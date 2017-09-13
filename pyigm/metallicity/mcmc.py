@@ -317,12 +317,20 @@ class Emceebones(object):
         print("There are {} models".format(self.nmodels))
 
 
+        
+        #check if mask of unphysical region is present
+        if(len(modl) > 4):
+            self.physmask=True
+            print('Using masks for physical/unphysical portion of paramater space')
+            
         #now queue up the model and data
         self.nions=0
         self.data=[]          #obs with corresponding ions in model
         self.mod_colm=[]      #columns for the ions in model matched to obs
         self.mod_colm_tag=[]  #ions in obs & model
+        self.mod_prior=[]     #mask for unphysical regions
 
+        
         #loop over all the ions observed
         for obs in data:
             # Check for zero error (causes unexepcted failure)
@@ -338,6 +346,8 @@ class Emceebones(object):
                 #[list of ndim arrays of columns for each ion]
                 self.mod_colm.append(modl[3]['N_'+obs[0]])
                 self.mod_colm_tag.append(obs[0])
+                if(self.physmask):
+                    self.mod_prior.append(modl[4][obs[0]])
                 self.nions=self.nions+1
 
             else:
@@ -346,11 +356,13 @@ class Emceebones(object):
 
         print("Handling {} ions".format(self.nions))
 
-        #at last store the NHI grid if useful for effective NHI
+        #now store the NHI grid if useful for effective NHI
         if(self.effnhi):
             print('Using effective NHI.. Load values')
             self.nhigrid=modl[3]['N_HI']
+      
 
+            
         return
 
     def plotinfo(self, sampler, use_pkl=False):
@@ -782,6 +794,7 @@ class Emceeutils():
         self.mod_axistag=0
         self.mod_axisval=0
         self.interpol=[]
+        self.interpol_phys=[]
         self.hiinterp=0
         self.effnhi=False
         self.nhigrid=0
@@ -789,7 +802,10 @@ class Emceeutils():
         self.logUconstraint=str(False)
         self.densGaussMean=0
         self.densGaussSig=0
-
+        #enable additional mask for unphysical regions
+        self.physmask=False
+        
+        
         return
 
     def lnprior(self, param):
@@ -892,12 +908,26 @@ class Emceeutils():
             #now call the interpolator for models given current ion
             mod_columns=self.interpol[ii](param)
 
+            #now evaluate if physical condition: if param is a region of space
+            #that cannot be occupied return a zero likelihood regardless to whether ions
+            #are measured or limits
+            if(self.physmask):           
+                mod_isphysical=self.interpol_phys[ii](param)
+            else:
+                mod_isphysical=1.0
+
+            #compute log of physical condition handling zeros if needed
+            if(mod_isphysical>0):
+                like_phys=np.log(mod_isphysical)
+            else:
+                like_phys=-np.inf
+
             #check if upper limit
             if(self.data[ii][3] == -1):
                 #integrate the upper limit of a Gaussian - cumulative distribution
                 arg=((self.data[ii][1]-mod_columns)/(np.sqrt(2)*self.data[ii][2]))[0]
                 thislike=mmath.log(0.5+0.5*mmath.erf(arg))
-                likeit=likeit+float(thislike)
+                likeit=likeit+float(thislike)+like_phys
                 #print self.data[ii][0], float(thislike), self.data[ii][1], mod_columns
 
             #check if lower limit
@@ -906,15 +936,14 @@ class Emceeutils():
                 #integrate the lower limit of a Gaussian - Q function
                 arg=((self.data[ii][1]-mod_columns)/(np.sqrt(2)*self.data[ii][2]))[0]
                 thislike=mmath.log(0.5-0.5*mmath.erf(arg))
-                likeit=likeit+float(thislike)
+                likeit=likeit+float(thislike)+like_phys
                 #print self.data[ii][0], float(thislike), self.data[ii][1], mod_columns
 
             #if value, just eval Gaussian
             else:
-
                 #add the likelihood for this ion
                 thislike=-1*np.log(np.sqrt(2*np.pi)*self.data[ii][2])-(self.data[ii][1]-mod_columns)**2/(2*self.data[ii][2]**2)
-                likeit=likeit+thislike
+                likeit=likeit+thislike+like_phys
 
         return likeit
 
@@ -943,9 +972,13 @@ class Emceeutils():
                 raise ValueError('Mismtach between observables and models. This is a big mistake!!!')
 
             #stack up the interpolator for current ions
-            self.interpol.append(interpolate.RegularGridInterpolator(self.mod_axisval,self.mod_colm[ii],
-                                                                     method='linear',bounds_error=False,fill_value=-np.inf))
+            self.interpol.append(interpolate.RegularGridInterpolator(self.mod_axisval,self.mod_colm[ii],method='linear',bounds_error=False,fill_value=-np.inf))
 
+            #enable physical prior if needed 
+            if(self.physmask):
+                self.interpol_phys.append(interpolate.RegularGridInterpolator(self.mod_axisval,self.mod_prior[ii],method='linear',bounds_error=False,fill_value=-np.inf))
+
+            
         #if using effective NHI, init the HI interpolator
         if(self.effnhi):
             self.hiinterp=interpolate.RegularGridInterpolator(self.mod_axisval,self.nhigrid,
