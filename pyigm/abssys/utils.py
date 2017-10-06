@@ -72,7 +72,7 @@ def dict_to_ions(idict):
 
 
 def hi_model(abssys, spec, lya_only=False, add_lls=False, ret_tau=False,
-             ignore_abslines=False, bval=30*u.km/u.s, **kwargs):
+             ignore_abslines=False, bval=30*u.km/u.s, llist=None, **kwargs):
     """ Generate a model of the absorption from the absorption system
     on an input spectrum.
 
@@ -92,6 +92,9 @@ def hi_model(abssys, spec, lya_only=False, add_lls=False, ret_tau=False,
       Doppler parameter to use if abslines not adopted
     ret_tau : bool, optional
       Return only the optical depth (used for multiple systems)
+    llist : LineList, optional
+      If provided, should speed up multiple calls to hi_model()
+      Should be LineList('HI')
     kwargs :
       Passed to voigt_from_abslines
 
@@ -116,7 +119,7 @@ def hi_model(abssys, spec, lya_only=False, add_lls=False, ret_tau=False,
         all_lines = []
         for iabssys in abssys:
             itau, ly_lines = hi_model(iabssys, spec, lya_only=lya_only, add_lls=add_lls,
-                     ignore_abslines=ignore_abslines, bval=bval, ret_tau=True, **kwargs)
+                     ignore_abslines=ignore_abslines, bval=bval, ret_tau=True, llist=llist, **kwargs)
             all_lines += ly_lines
             if tau is None:
                 tau = itau
@@ -131,7 +134,7 @@ def hi_model(abssys, spec, lya_only=False, add_lls=False, ret_tau=False,
         if not ignore_abslines:
             alines = []
         else:
-            alines = abssys.list_of_abslines()
+            alines = abssys._abslines
         lyman_lines = []
         lya_lines = []
         logNHIs = []
@@ -151,17 +154,18 @@ def hi_model(abssys, spec, lya_only=False, add_lls=False, ret_tau=False,
         else: # Generate one
             warnings.warn("Generating the absorption lines from the system info, not abslines")
             if lya_only:
-                lya_line = AbsLine('HI 1215', z=abssys.zabs)
+                lya_line = AbsLine('HI 1215', z=abssys.zabs, linelist=llist)
                 lya_line.attrib['N'] = 10**abssys.NHI / u.cm**2
                 lya_line.attrib['b'] = bval
                 lyman_lines.append(lya_line)
             else:
-                HIlines = LineList('HI')
-                wrest = Quantity(HIlines._data['wrest'])
+                if llist is None:
+                    llist = LineList('HI')
+                wrest = Quantity(llist._data['wrest'])
                 for iwrest in wrest:
                     # On the spectrum?
                     if iwrest >= spec.wvmin/(1+abssys.zabs):
-                        lyman_line = AbsLine(iwrest, linelist=HIlines, z=abssys.zabs)
+                        lyman_line = AbsLine(iwrest, linelist=llist, z=abssys.zabs)
                         lyman_line.attrib['N'] = 10**abssys.NHI / u.cm**2
                         lyman_line.attrib['b'] = bval
                         lyman_lines.append(lyman_line)
