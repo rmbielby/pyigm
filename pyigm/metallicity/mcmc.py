@@ -105,7 +105,7 @@ from linetools import utils as ltu
 ##For logUconstraint
 import pyigm.euvb.cloudyiongrid as cld
 from astropy import constants as const
-from scipy import integrate 
+from scipy import integrate
 from scipy.interpolate import interp1d
 
 
@@ -114,19 +114,19 @@ def integrate_uvb(redshift, UVB="HM05logU"):
     """
     Integrates the UVB spectrum, useful for computing logU.
     The only two UVBs for this are HM05 and HM12 because that's all I have packaged up.
-    
+
     Parameters
     ----------
     UVB : str
         Which UVB to use. Currently, "HM05" and "HM12" are supported
-    
+
     Returns
     ----------
     phi,err : float np.array
         The integrated UVB spectrum and corresponding error in the integration
     """
     ##This was taken almost directly from "getionisation.py" from Michele Fumagalli
-    
+
     #init UVB at given redshift
     if UVB == 'HM05' or UVB == 'HM05logU':
         uvb=cld.Cldyion(uvb='HM05logU')
@@ -140,28 +140,28 @@ def integrate_uvb(redshift, UVB="HM05logU"):
         uvb.uvbtype='HM12'
 
     uvb.redshift=redshift
-  
+
     #Get the freqeunce Log of Hz and UVB Log of erg/s/cm2/Hz
     uvb.inituvb()
-        
+
     #now integrate 4pi Jnu / h  in d log nu
     sort=np.argsort(uvb.source['lgnu'])
     uvb.source['lgnu']=uvb.source['lgnu'][sort]
     uvb.source['lgfpiJ']=uvb.source['lgfpiJ'][sort]
-   
+
     #define integral quantity (integrate in d log nu)
     lognu=np.log(10**uvb.source['lgnu'])
     hplanck = 6.6260755e-27 # erg/s
     integrand=10**uvb.source['lgfpiJ']/hplanck
-    
+
     #Define min-max in log_natural Hz
     maxnu=np.max(lognu)
     ionnu=np.log((const.c.to('cm/s')/(912*1e-8)).value)
-    
+
     #integrate [checked against cloudy output]
     fint = interp1d(lognu,integrand)
     phi,err = integrate.quad(fint,ionnu,maxnu)
-    
+
     return phi,err
 
 
@@ -170,7 +170,7 @@ def logU_to_dens(logU, redshift, UVB="HM05logU", spectrum=None):
     """
     Convert logU to n_H (total H number density) using the given UVB.
     The only two UVBs for this are HM05 and HM12 because that's all I have packaged up.
-    
+
     Parameters
     ----------
     logU : float
@@ -182,37 +182,37 @@ def logU_to_dens(logU, redshift, UVB="HM05logU", spectrum=None):
         re-integrate the spectrum EVERY time this function is called.
     UVB : str
         Which UVB to use. Currently, "HM05" and "HM12" are supported
-    
+
     Returns
     ----------
     dens : float
         The single value of density (n_H) that corresponds to
         the input logU and redshift, using the input UVB
     """
-    
+
     if not spectrum:
         phi,err = integrate_uvb(redshift, UVB)
     else:
         phi = spectrum
-    
+
     #now compute the ionization parameter
     # den=result['tags'].index('dens')
     # Uparam=np.log10(phi)-result['pdfs'][:,den]-np.log10(const.c.to('cm/s').value)
     dens=np.log10(phi)-np.log10(const.c.to('cm/s').value)-logU
-    
+
     return dens
-    
+
 
 
 def dens_to_logU(dens, redshift, UVB='HM05logU', spectrum=None):
-    
+
     """
     This converts density (n_H) to logU.
     It does a binary search looking for the best
       (logU --> density) that matches that desired density.
     This one is not used directly in the MCMC,
       but is a useful conversion utility.
-    
+
     Parameters
     ----------
     dens : float
@@ -221,21 +221,21 @@ def dens_to_logU(dens, redshift, UVB='HM05logU', spectrum=None):
         The redshift at which you'd like to convert density (n_H) --> logU
     UVB : str
         Which UVB to use. Currently, "HM05" and "HM12" are supported
-    
+
     Returns
     ----------
     logU : float
         The single value of logU that corresponds to
         the input density (n_H) and redshift, using the input UVB
-    
+
     """
-    
-    
+
+
     tolerance_dens=0.0001
     step_logU = tolerance_dens/2.
     logUarray = np.arange(-6.0,+1.0,step_logU)
-    
-    
+
+
     i=0
     low_i=0
     high_i=len(logUarray)-1
@@ -244,21 +244,38 @@ def dens_to_logU(dens, redshift, UVB='HM05logU', spectrum=None):
         logU = logUarray[i]
         testDens = logU_to_dens(logU, redshift, spectrum=spectrum, UVB=UVB)
         ##If it gets to this point, the tolerance has NOT been met
-        
+
         ##If it's greater (i.e., positive), then
         ##  we're too HIGH in density (too LOW in logU)
         if testDens > dens:
             low_i = i
         else:
             high_i = i
-        
+
         ##Go halfway between the highest "low" and
         ##  the lowest "high" i's
         i = int(np.floor((high_i - low_i)/2. + low_i))
-    
-    
+
+
     return logU
 
+class ToArabic(str):
+    def __init__(self, roman):
+        roman = self.check_valid(roman)
+        keys = ['IV', 'IX', 'XL', 'XC', 'CD', 'CM', 'I', 'V', 'X', 'L', 'C', 'D', 'M']
+        to_arabic = {'IV': '4', 'IX': '9', 'XL': '40', 'XC': '90', 'CD': '400', 'CM': '900',
+                'I': '1', 'V': '5', 'X': '10', 'L': '50', 'C': '100', 'D': '500', 'M': '1000'}
+        for key in keys:
+            if key in roman:
+                roman = roman.replace(key, ' {}'.format(to_arabic.get(key)))
+        self.arabic = sum(int(num) for num in roman.split())
+
+    def check_valid(self, roman):
+        roman = roman.upper()
+        invalid = ['IIII', 'VV', 'XXXX', 'LL', 'CCCC', 'DD', 'MMMM']
+        if any(sub in roman for sub in invalid):
+            raise ValueError('Numerus invalidus est: {}'.format(roman))
+        return roman
 
 
 
@@ -319,75 +336,108 @@ class Emceebones(object):
         ----------
         data :
           observations
-        model : pickle file
+        model : pickle or hdf5 file
 
         Returns
         -------
 
         """
-        
         #load the model in a format that can be handled later on
-        try:
-            ##Python3
-            fil=open(model,'br')
-            modl=pickle.load(fil,encoding='latin1')
-        except:
-            ##Python2
-            fil=open(model,'r')
-            modl=pickle.load(fil)
-
-        fil.close()
-
-        #unpack axis tag, axis value, grid column, grid ions
-        self.mod_axistag=modl[0]
-        self.mod_axisval=[]
-
-        #define the dimension of the problem
-        self.ndim=len(self.mod_axistag)
-        self.nmodels=1
-        for tt in self.mod_axistag:
-            self.nmodels=self.nmodels*(modl[1][tt]).size
-            #append axis value in a list
-            self.mod_axisval.append(modl[1][tt])
-
-        print("The problem has dimension {}".format(self.ndim))
-        print("There are {} models".format(self.nmodels))
-
-
-        #now queue up the model and data
         self.nions=0
         self.data=[]          #obs with corresponding ions in model
         self.mod_colm=[]      #columns for the ions in model matched to obs
         self.mod_colm_tag=[]  #ions in obs & model
+        if model[-3:] == 'pkl':
+            print('Attemtping to load model from pkl file: {0}'.format(model))
+            try:
+                ##Python3
+                fil=open(model,'br')
+                modl=pickle.load(fil,encoding='latin1')
+            except:
+                ##Python2
+                fil=open(model,'r')
+                modl=pickle.load(fil)
+            fil.close()
+            #unpack axis tag, axis value, grid column, grid ions
+            self.mod_axistag=modl[0]
+            self.mod_axisval=[]
+            #define the dimension of the problem
+            self.ndim=len(self.mod_axistag)
+            self.nmodels=1
+            for tt in self.mod_axistag:
+                self.nmodels=self.nmodels*(modl[1][tt]).size
+                #append axis value in a list
+                self.mod_axisval.append(modl[1][tt])
+            print("The problem has dimension {}".format(self.ndim))
+            print("There are {} models".format(self.nmodels))
+            #now queue up the model and data
+            #loop over all the ions observed
+            for obs in data:
+                # Check for zero error (causes unexepcted failure)
+                if obs[2] <= 0.:
+                    raise ValueError("Cannot have 0 error on the column density, even in a limit.  Fix {}".format(obs[0]))
+                #check obs one by one for corresponding entries in model
+                if (obs[0] in modl[2]):
+                    #stack the observable
+                    #[list of tuples for observations with (ion,column,error)]
+                    self.data.append(obs)
+                    #stack the columns for the models
+                    #[list of ndim arrays of columns for each ion]
+                    self.mod_colm.append(modl[3]['N_'+obs[0]])
+                    self.mod_colm_tag.append(obs[0])
+                    self.nions=self.nions+1
+                else:
+                    print("{} not in the grid: skip this ion!".format(obs[0]))
+            print("Handling {} ions".format(self.nions))
 
-        #loop over all the ions observed
-        for obs in data:
-            # Check for zero error (causes unexepcted failure)
-            if obs[2] <= 0.:
-                raise ValueError("Cannot have 0 error on the column density, even in a limit.  Fix {}".format(obs[0]))
+            #at last store the NHI grid if useful for effective NHI
+            if(self.effnhi):
+                print('Using effective NHI.. Load values')
+                self.nhigrid=modl[3]['N_HI']
+        else:
+            import h5py
+            print('Attempting to load model from hdf5 file: {0}'.format(model))
+            modlh = h5py.File(model, 'r')
+            self.mod_axistag = ['NHI','redshift','Z','nH']
+            self.mod_axisval=[]
 
-            #check obs one by one for corresponding entries in model
-            if (obs[0] in modl[2]):
-                #stack the observable
-                #[list of tuples for observations with (ion,column,error)]
-                self.data.append(obs)
-                #stack the columns for the models
-                #[list of ndim arrays of columns for each ion]
-                self.mod_colm.append(modl[3]['N_'+obs[0]])
-                self.mod_colm_tag.append(obs[0])
-                self.nions=self.nions+1
-
-            else:
-
-                print("{} not in the grid: skip this ion!".format(obs[0]))
-
-        print("Handling {} ions".format(self.nions))
-
-        #at last store the NHI grid if useful for effective NHI
-        if(self.effnhi):
-            print('Using effective NHI.. Load values')
-            self.nhigrid=modl[3]['N_HI']
-
+            #define the dimension of the problem
+            self.ndim=len(self.mod_axistag)
+            self.nmodels=1
+            for tt in self.mod_axistag:
+                print (tt,modlh[tt])
+                self.nmodels=self.nmodels*modlh[tt].size
+                self.mod_axisval.append(modlh[tt].value)
+            print("The problem has dimension {}".format(self.ndim))
+            print("There are {} models".format(self.nmodels))
+            self.nions=0
+            self.mod_colm=[]      #columns for the ions in model matched to obs
+            self.mod_colm_tag=[]  #ions in obs & model
+            for obs in data:
+                if obs[2] <= 0.:
+                    raise ValueError("Cannot have 0 error on the column density, even in a limit.  Fix {}".format(obs[0]))
+                #check obs one by one for corresponding entries in model
+                atom = obs[0].split('I')[0].split('V')[0]
+                print (atom)
+                state = ToArabic(obs[0].split(atom)[-1])
+                state = state.arabic-1
+                # print obs.split(atom)[-1],state
+                # Check for zero error (causes unexepcted failure)
+                if (atom in modlh['N'].keys()):
+                    # print modlh['N'][atom]
+                    # print np.shape(modlh['N'][atom][:,:,:,:,state])
+                    self.data.append(obs)
+                    self.mod_colm.append(modlh['N'][atom][:,:,:,:,state])
+                    self.mod_colm_tag.append(obs[0])
+                    self.nions=self.nions+1
+                else:
+                    print("{} not in the grid: skip this ion!".format(obs[0]))
+            print (np.shape(self.mod_colm))
+            if(self.effnhi):
+                print('Using effective NHI.. Load values')
+                self.nhigrid=modlh['N']['H'][:,:,:,:,0]
+            self.mod_axistag[1] = 'red'
+            print("Handling {} ions".format(self.nions))
         return
 
     def plotinfo(self, sampler, use_pkl=False):
@@ -437,7 +487,7 @@ class Emceebones(object):
         import json
 
         #this bit appears prone to crash with python3 due to some ascii encoding issue with hdf5 in python 3
-        #giving a chance to the code to run anyway if hdf5 
+        #giving a chance to the code to run anyway if hdf5
         try:
             with h5py.File(self.outsave+'/'+self.info['name']+'_emcee.hd5', 'w') as f:
                 # Input
@@ -455,11 +505,11 @@ class Emceebones(object):
                     out_group[out_key] = self.final[out_key]
         except:
             pass
-        
+
         ############
         ##Plot
         ############
-        
+
         ######Setup
         if self.ndim < 4:
             title_xpos = 0.45
@@ -469,21 +519,21 @@ class Emceebones(object):
             title_xpos = 0.35
             title_ypos = 0.85
             title_fontsize = 14
-        
-        
+
+
         if self.logUconstraint.lower() == 'true':
             lutext = "{} +/- {}".format(self.logUmean, self.logUsigma)
         else:
             lutext = "False"
-        
+
         plot_title = "{}\nUVB={}, log U prior={}".format(self.info['name'], self.UVB, lutext)
         # plot_title = "{}".format(self.info['name'])
 
-        
+
         ######
         ##Chains Plot
         ######
-        
+
         #Start by plotting the chains with initial guess and final values
         xaxislabels = None
         fig=plt.figure()
@@ -502,14 +552,14 @@ class Emceebones(object):
             ##Remove x-axis labels, and put ticks inside
             if xaxislabels is None:
                 xaxislabels = plt.xticks()[0]
-            
+
             ax.set_xticklabels("")
             ax.tick_params(axis='both', direction='in', top=True)
-            
+
             ##If it's the first (top) one, add a title
             if ii == 0:
                 plt.title(plot_title,fontsize=10)
-            
+
             #overplot burnt in cut
             ax.axvline(x=self.burn,color='red',linewidth=3)
             #overplot median
@@ -529,20 +579,20 @@ class Emceebones(object):
         ######
         ##Corner Plot
         ######
-        
+
         samples = sampler.chain[:,self.burn:, :].reshape((-1,self.ndim))
         cfig = corner.corner(samples, labels=self.mod_axistag, label_kwargs = {"fontsize": 16}, quantiles=[0.05,0.5,0.95],verbose=False)
         cfig.text(title_xpos,title_ypos,plot_title,horizontalalignment='left',fontsize=title_fontsize)
         cfig.savefig(self.outsave+'/'+self.info['name']+'_corner.pdf')
         plt.close(cfig)
-        
-        
+
+
         ######
         ##Residuals Plot
         ######
-        
+
         rfig=plt.figure()
-        
+
         #plot values
         xaxis=np.arange(0,self.nions,1)
         axlab=[]
@@ -568,9 +618,9 @@ class Emceebones(object):
         plt.title(plot_title,fontsize=10)
         rfig.savefig(self.outsave+'/'+self.info['name']+'_residual.pdf')
         plt.close(rfig)
-        
+
         ############
-        
+
         print('All done with system {}!'.format(self.info['name']))
 
 
@@ -600,7 +650,7 @@ class Emceebones(object):
         ##We do this here so we only have to do it ONCE for each sightline
         ##  rather than every time lnprior() is called
         emc.logUconstraint=str(self.logUconstraint)
-        
+
         # logUGaussx = np.arange(-6.0,0.0+buff,0.10)
         # logUGauss  = np.array(1/(np.sqrt(2*np.pi*logUsigma**2))*np.exp(-(logUGaussx-logUmean)**2/(2*logUsigma**2)))
 
@@ -782,10 +832,10 @@ class Emceebones(object):
                     #now assign value to starting balls
                     for i in range(self.nwalkers):
                         pos[i][pp]=ballst[i]
-        
+
         if self.logUconstraint.lower() == 'true':
             print('Using constraint on logU (and therefore on dens), assuming a '+self.UVB+' UVB')
-        
+
         else:
             print('Not using constraint on logU (and therefore on dens)')
 
@@ -1242,12 +1292,3 @@ def mcmc_ions(data,infodata,model,logUconstraint=False, logUmean=-2.968, logUsig
 
 
     return
-
-
-
-
-
-
-
-
-
